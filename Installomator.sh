@@ -20,9 +20,11 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # NOTE: adjust these variables:
 
-# set to 0 for production, 1 for debugging
+# set to 0 for production, 1 or 2 for debugging
 # while debugging, items will be downloaded to the parent directory of this script
 # also no actual installation will be performed
+# debug mode 1 will download to the directory the script is run in, but will not check version 
+# debug mode 2 will download to the temp directory, check for blocking processes, check version, but will not install anything or remove the current version
 DEBUG=1
 
 # notify behavior
@@ -223,7 +225,7 @@ REOPEN="yes"
 #   See label adobecreativeclouddesktop
 #
 VERSION="9.0dev"
-VERSIONDATE="2021-11-23"
+VERSIONDATE="2022-01-07"
 
 # MARK: Functions
 
@@ -231,7 +233,7 @@ cleanupAndExit() { # $1 = exit code, $2 message
     if [[ -n $2 && $1 -ne 0 ]]; then
         printlog "ERROR: $2"
     fi
-    if [ "$DEBUG" -eq 0 ]; then
+    if [ "$DEBUG" -ne 1 ]; then
         # remove the temporary working directory when done
         printlog "Deleting $tmpDir"
         rm -Rf "$tmpDir"
@@ -425,9 +427,9 @@ getAppVersion() {
 }
 
 checkRunningProcesses() {
-    # don't check in DEBUG mode
-    if [[ $DEBUG -ne 0 ]]; then
-        printlog "DEBUG mode, not checking for blocking processes"
+    # don't check in DEBUG mode 1
+    if [[ $DEBUG -eq 1 ]]; then
+        printlog "DEBUG mode 1, not checking for blocking processes"
         return
     fi
 
@@ -532,9 +534,9 @@ reopenClosedProcess() {
         return
     fi
 
-    # don't reopen in DEBUG mode
-    if [[ $DEBUG -ne 0 ]]; then
-        printlog "DEBUG mode, not reopening anything"
+    # don't reopen in DEBUG mode 1
+    if [[ $DEBUG -eq 1 ]]; then
+        printlog "DEBUG mode 1, not reopening anything"
         return
     fi
     
@@ -591,16 +593,16 @@ installAppWithPath() { # $1: path to app to install in $targetDir
         printlog "Downloaded version of $name is $appNewVersion (replacing version $appversion)."
     fi
 
-    # skip install for DEBUG
-    if [ "$DEBUG" -ne 0 ]; then
-        printlog "DEBUG enabled, skipping remove, copy and chown steps"
+    # skip install for DEBUG 1
+    if [ "$DEBUG" -eq 1 ]; then
+        printlog "DEBUG mode 1 enabled, skipping remove, copy and chown steps"
         return 0
     fi
 
-    # check for root
-    if [ "$(whoami)" != "root" ]; then
-        # not running as root
-        cleanupAndExit 6 "not running as root, exiting"
+    # skip install for DEBUG 2
+    if [ "$DEBUG" -eq 2 ]; then
+        printlog "DEBUG mode 2 enabled, exiting"
+        cleanupAndExit 0
     fi
     
     # Test if variable CLIInstaller is set
@@ -712,16 +714,16 @@ installFromPKG() {
         fi
     fi
     
-    # skip install for DEBUG
-    if [ "$DEBUG" -ne 0 ]; then
+    # skip install for DEBUG 1
+    if [ "$DEBUG" -eq 1 ]; then
         printlog "DEBUG enabled, skipping installation"
         return 0
     fi
 
-    # check for root
-    if [ "$(whoami)" != "root" ]; then
-        # not running as root
-        cleanupAndExit 6 "not running as root, exiting"
+    # skip install for DEBUG 2
+    if [ "$DEBUG" -eq 2 ]; then
+        printlog "DEBUG mode 2 enabled, exiting"
+        cleanupAndExit 0 
     fi
 
     # install pkg
@@ -930,6 +932,11 @@ versionKey="CFBundleShortVersionString"
 # get current user
 currentUser=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ { print $3 }')
 
+# MARK: check for root
+if [[ "$(whoami)" != "root" && "$DEBUG" -eq 0 ]]; then
+    # not running as root
+    cleanupAndExit 6 "not running as root, exiting"
+fi
 
 # MARK: labels in case statement
 case $label in
@@ -958,6 +965,14 @@ valuesfromarguments)
     ;;
 
 # label descriptions start here
+
+wwdcformac)
+   #this label looks like software/site is gone
+   name="WWDC"
+   type="dmg"
+   downloadURL="https://f001.backblazeb2.com/file/wwdcio/WWDC_latest.dmg"
+   expectedTeamID="8C7439RJLG"
+   ;;
 1password7)
     name="1Password 7"
     type="pkg"
@@ -1238,10 +1253,8 @@ autodmg)
     expectedTeamID="5KQ3D3FG5H"
     ;;
 autopkgr)
-    # credit: Søren Theilgaard (@theilgaard)
     name="AutoPkgr"
     type="dmg"
-    #downloadURL=$(curl -fs "https://api.github.com/repos/lindegroup/autopkgr/releases/latest" | awk -F '"' "/browser_download_url/ && /dmg/ && ! /sig/ && ! /CLI/ && ! /sha256/ { print \$4 }")
     downloadURL=$(downloadURLFromGit lindegroup autopkgr)
     appNewVersion=$(versionFromGit lindegroup autopkgr)
     expectedTeamID="JVY2ZR6SEF"
@@ -1540,11 +1553,11 @@ cyberduck)
     expectedTeamID="G69SCX94XU"
     ;;
 dangerzone)
-    # credit: Micah Lee (@micahflee)
     name="Dangerzone"
     type="dmg"
-    downloadURL=$(curl -s https://dangerzone.rocks/ | grep https://github.com/firstlookmedia/dangerzone/releases/download | grep \.dmg | cut -d'"' -f2)
-    expectedTeamID="P24U45L8P5"
+    downloadURL="$(downloadURLFromGit firstlookmedia dangerzone)"
+    appNewVersion="$(versionFromGit firstlookmedia dangerzone)"
+    expectedTeamID="N9B95FDWH4"
     ;;
 darktable)
     # credit: Søren Theilgaard (@theilgaard)
@@ -1747,13 +1760,12 @@ favro)
 ferdi)
     name="Ferdi"
     type="zip"
-    if [[ $(arch) == i386 ]]; then
-    downloadURL=$(curl --silent --fail "https://api.github.com/repos/getferdi/ferdi/releases/latest" \
-    | awk -F '"' "/browser_download_url/ && /mac.zip/ && ! /blockmap/ && ! /arm64-mac/ && ! /AppImage/{ print \$4 }")
-    elif [[ $(arch) == arm64 ]]; then
-    downloadURL=$(downloadURLFromGit getferdi ferdi )
-    archiveName="arm64-mac.zip"
-    fi    
+    if [[ $(arch) == "arm64" ]]; then
+        archiveName="arm64-mac.zip"
+    elif [[ $(arch) == "i386" ]]; then
+        archiveName="Ferdi-[0-9.]*-mac.zip"
+    fi
+    downloadURL="$(downloadURLFromGit getferdi ferdi)"
     appNewVersion=$(versionFromGit getferdi ferdi )
     expectedTeamID="B6J9X9DWFL"
     ;;
@@ -1985,10 +1997,11 @@ gpgsuite)
     expectedTeamID="PKV8ZPD836"
     ;;
 gpgsync)
-    # credit: Micah Lee (@micahflee)
     name="GPG Sync"
     type="pkg"
-    downloadURL="https://github.com$(curl -s -L https://github.com/firstlookmedia/gpgsync/releases/latest | grep /firstlookmedia/gpgsync/releases/download | grep \.pkg | cut -d'"' -f2)"
+    packageID="org.firstlook.gpgsync"
+    downloadURL="$(downloadURLFromGit firstlookmedia gpgsync)"
+    appNewVersion="$(versionFromGit firstlookmedia gpgsync)"
     expectedTeamID="P24U45L8P5"
     ;;
 grandperspective)
@@ -3042,6 +3055,13 @@ pandoc)
     archiveName="mac.pkg"
     expectedTeamID="5U2WKE6DES"
     ;;
+paretosecurity)
+    name="Pareto Security"
+    type="dmg"
+    downloadURL=$(downloadURLFromGit ParetoSecurity pareto-mac)
+    appNewVersion=$(versionFromGit ParetoSecurity pareto-mac)
+    expectedTeamID="PM784W7B8X"
+    ;;
 parsec)
     name="Parsec"
     type="pkg"
@@ -3124,13 +3144,21 @@ promiseutilityr)
     downloadURL="https://www.promise.com/DownloadFile.aspx?DownloadFileUID=6533"
     expectedTeamID="268CCUR4WN"
     ;;
+protonvpn)
+    name="ProtonVPN"
+    type="dmg"
+    downloadURL=$(curl -fs "https://protonvpn.com/download" | grep -Eo "(http|https)://[a-zA-Z0-9./?=_%:-]*\.dmg" | head -1)
+    appNewVersion=$(echo $downloadURL | sed -e 's/^.*\/Proton.*_v\([0-9.]*\)\.dmg/\1/g')
+    expectedTeamID="J6S6Q257EK"
+    ;;
 proxyman)
-	name="Proxyman"
-	type="dmg"
-	downloadURL="https://proxyman.io/release/osx/Proxyman_latest.dmg"
-	expectedTeamID="3X57WP8E8V"
-	appNewVersion=$(curl -s -L https://github.com/ProxymanApp/Proxyman | grep -o 'releases/tag/.*\>' | awk -F '/' '{print $3}')
-	;;
+    name="Proxyman"
+    type="dmg"
+    #downloadURL="https://proxyman.io/release/osx/Proxyman_latest.dmg"
+    downloadURL="$(downloadURLFromGit ProxymanApp Proxyman)"
+    appNewVersion="$(versionFromGit ProxymanApp Proxyman)"
+    expectedTeamID="3X57WP8E8V"
+    ;;
 pymol)
     name="PyMOL"
     type="dmg"
@@ -3611,7 +3639,7 @@ telegram)
     ;;
 textexpander)
     name="TextExpander"
-    type="zip"
+    type="dmg"
     downloadURL="https://textexpander.com/cgi-bin/redirect.pl?cmd=download&platform=osx"
     appNewVersion=$( curl -fsIL "https://textexpander.com/cgi-bin/redirect.pl?cmd=download&platform=osx" | grep -i "^location" | awk '{print $2}' | tail -1 | cut -d "_" -f2 | sed -nre 's/^[^0-9]*(([0-9]+\.)*[0-9]+).*/\1/p' )
     expectedTeamID="7PKJ6G4DXL"
@@ -3746,7 +3774,13 @@ veracrypt)
     appNewVersion=$( echo "${downloadURL}" | sed -E 's/.*\/[a-zA-Z]*_([0-9.]*.*)\.dmg/\1/g' )
     expectedTeamID="Z933746L2S"
     ;;
-virtualbox)
+vimac)
+    name="Vimac"
+    type="zip"
+    downloadURL=$(curl -fs "https://vimacapp.com/latest-release-metadata" | tr ',' '\n' | awk -F\" '/download_url/ {print $4}')
+    appNewVersion=$(curl -fs "https://vimacapp.com/latest-release-metadata" | tr ',' '\n' | awk -F\" '/short_version/ {print $4}')
+    expectedTeamID="LQ2VH8VB84"
+    ;;virtualbox)
     # credit: AP Orlebeke (@apizz)
     name="VirtualBox"
     type="pkgInDmg"
@@ -3859,7 +3893,6 @@ wickrpro)
     expectedTeamID="W8RC3R952A"
     ;;
 wireshark)
-    # credit: Oh4sh0 https://github.com/Oh4sh0
     name="Wireshark"
     type="dmg"
     downloadURL="https://1.as.dl.wireshark.org/osx/Wireshark%20Latest%20Intel%2064.dmg"
@@ -4134,7 +4167,7 @@ if [[ -z $blockingProcesses ]]; then
 fi
 
 # MARK: determine tmp dir
-if [ "$DEBUG" -ne 0 ]; then
+if [ "$DEBUG" -eq 1 ]; then
     # for debugging use script dir as working directory
     tmpDir=$(dirname "$0")
 else
@@ -4162,7 +4195,7 @@ fi
 if [[ -n $appNewVersion ]]; then
     printlog "Latest version of $name is $appNewVersion"
     if [[ $appversion == $appNewVersion ]]; then
-        if [[ $DEBUG -eq 0 ]]; then
+        if [[ $DEBUG -ne 1 ]]; then
             printlog "There is no newer version available."
             if [[ $INSTALL != "force" ]]; then
                 message="$name, version $appNewVersion, is  the latest version."
@@ -4173,7 +4206,7 @@ if [[ -n $appNewVersion ]]; then
                 cleanupAndExit 0 "No newer version."
             fi
         else
-            printlog "DEBUG mode enabled, not exiting, but there is no new version of app."
+            printlog "DEBUG mode 1 enabled, not exiting, but there is no new version of app."
         fi
     fi
 else
@@ -4183,7 +4216,7 @@ fi
 # MARK: check if this is an Update and we can use updateTool
 if [[ (-n $appversion && -n "$updateTool") || "$type" == "updateronly" ]]; then
     printlog "appversion & updateTool"
-    if [[ $DEBUG -eq 0 ]]; then
+    if [[ $DEBUG -ne 1 ]]; then
         if runUpdateTool; then
             finishing
             cleanupAndExit 0
@@ -4192,13 +4225,13 @@ if [[ (-n $appversion && -n "$updateTool") || "$type" == "updateronly" ]]; then
             cleanupAndExit 0
         fi # otherwise continue
     else
-        printlog "DEBUG mode enabled, not running update tool"
+        printlog "DEBUG mode 1 enabled, not running update tool"
     fi
 fi
 
 # MARK: download the archive
-if [ -f "$archiveName" ] && [ "$DEBUG" -ne 0 ]; then
-    printlog "$archiveName exists and DEBUG enabled, skipping download"
+if [ -f "$archiveName" ] && [ "$DEBUG" -eq 1 ]; then
+    printlog "$archiveName exists and DEBUG mode 1 enabled, skipping download"
 else
     # download the dmg
     printlog "Downloading $downloadURL to $archiveName"

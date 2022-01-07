@@ -2,7 +2,7 @@
 wwdcformac)
    #this label looks like software/site is gone
    name="WWDC"
-   type="zip"
-   downloadURL="https://cdn.wwdc.io/WWDC_latest.zip"
+   type="dmg"
+   downloadURL="https://f001.backblazeb2.com/file/wwdcio/WWDC_latest.dmg"
    expectedTeamID="8C7439RJLG"
    ;;
